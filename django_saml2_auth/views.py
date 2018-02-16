@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
+import logging
 
 from saml2 import (
     BINDING_HTTP_POST,
@@ -33,6 +34,8 @@ if parse_version(get_version()) >= parse_version('1.7'):
     from django.utils.module_loading import import_string
 else:
     from django.utils.module_loading import import_by_path as import_string
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_domain(r):
@@ -131,16 +134,21 @@ def acs(r):
     next_url = r.session.get('login_next_url', settings.SAML2_AUTH.get('DEFAULT_NEXT_URL', get_reverse('admin:index')))
 
     if not resp:
+        logger.debug('User Denied: no Authn response')
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
     authn_response = saml_client.parse_authn_request_response(
         resp, entity.BINDING_HTTP_POST)
     if authn_response is None:
+        logger.debug('User Denied: Authn parse error')
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
     user_identity = authn_response.get_identity()
     if user_identity is None:
+        logger.debug('User Denied: Authn response with missing user identity')
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
+
+    logger.debug(user_identity)
 
     user_email = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('email', 'Email')][0]
     user_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('username', 'UserName')][0]
@@ -155,6 +163,7 @@ def acs(r):
         if settings.SAML2_AUTH.get('TRIGGER', {}).get('BEFORE_LOGIN', None):
             import_string(settings.SAML2_AUTH['TRIGGER']['BEFORE_LOGIN'])(user_identity)
     except User.DoesNotExist:
+        logger.debug('User %s does not exist. Creating.' % user_email)
         target_user = _create_new_user(user_name, user_email, user_first_name, user_last_name)
         if settings.SAML2_AUTH.get('TRIGGER', {}).get('CREATE_USER', None):
             import_string(settings.SAML2_AUTH['TRIGGER']['CREATE_USER'])(user_identity)
